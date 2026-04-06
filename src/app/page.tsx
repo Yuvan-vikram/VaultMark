@@ -163,7 +163,7 @@ export default function Home() {
       )
     : getFolderDirectLinks(tree, selectedFolder)
 
-  const allTags = [...new Set(allLinks.flatMap(i => i.tags || []))]
+  const allTags = Array.from(new Set(allLinks.flatMap(i => i.tags || [])))
   const folderName = getFolderName(tree, selectedFolder)
 
   return (
