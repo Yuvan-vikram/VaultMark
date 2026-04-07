@@ -3,12 +3,13 @@ import { NextResponse } from 'next/server';
 
 // This connects using the URL in your .env.local file
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  // Use POSTGRES_URL if it's in your Vercel settings, otherwise stick to DATABASE_URL
+  connectionString: process.env.POSTGRES_URL || process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Required for Neon/Vercel connections
+    // This is the "Magic Fix" for Vercel + Neon
+    rejectUnauthorized: false 
   }
 });
-
 export async function GET() {
   try {
     const client = await pool.connect();
