@@ -1,45 +1,38 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { readBookmarks, writeBookmarks, insertInto } from '@/lib/data'
-import type { BookmarkItem } from '@/lib/data'
-import { randomUUID } from 'crypto'
+import { neon } from '@neondatabase/serverless';
+import { NextResponse } from 'next/server';
+
+// This pulls the URL from Vercel's environment variables
+const sql = neon(process.env.DATABASE_URL!);
 
 export async function GET() {
   try {
-    const data = readBookmarks()
-    return NextResponse.json(data)
-  } catch (e) {
-    return NextResponse.json({ error: 'Failed to read bookmarks' }, { status: 500 })
+    const rows = await sql`SELECT * FROM bookmarks ORDER BY id ASC`;
+    return NextResponse.json({ tree: rows });
+  } catch (err: any) {
+    console.error("GET Error:", err);
+    return NextResponse.json({ error: 'Fetch Error', details: err.message }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const body = await req.json()
-    const { folderId, type, name, url, description, tags, color } = body
+    const { name, url, description, tags, folderId, type } = await request.json();
 
-    if (!name || !type) {
-      return NextResponse.json({ error: 'name and type required' }, { status: 400 })
-    }
+    await sql`
+      INSERT INTO bookmarks (name, url, description, tags, folder_id, type) 
+      VALUES (
+        ${name || 'Untitled'}, 
+        ${url || ''}, 
+        ${description || ''}, 
+        ${JSON.stringify(tags || [])}, 
+        ${folderId || null}, 
+        ${type || 'link'}
+      )
+    `;
 
-    const data = readBookmarks()
-    const now = new Date().toISOString()
-    const item: BookmarkItem = {
-      id: randomUUID(),
-      type,
-      name,
-      url,
-      description,
-      tags: tags || [],
-      color,
-      children: type === 'folder' ? [] : undefined,
-      createdAt: now,
-      updatedAt: now,
-    }
-
-    insertInto(data.tree, folderId || null, item)
-    writeBookmarks(data)
-    return NextResponse.json({ ok: true, item })
-  } catch (e) {
-    return NextResponse.json({ error: 'Failed to create' }, { status: 500 })
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    console.error("POST Error:", err);
+    return NextResponse.json({ error: 'Save Error', details: err.message }, { status: 500 });
   }
 }
