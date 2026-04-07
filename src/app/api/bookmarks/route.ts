@@ -4,15 +4,34 @@ import { NextResponse } from 'next/server';
 const sql = neon(process.env.DATABASE_URL!);
 
 // 1. FETCH ALL (GET)
+// export async function GET() {
+//   try {
+//     const rows = await sql`SELECT * FROM bookmarks ORDER BY id ASC`;
+//     return NextResponse.json({ tree: rows });
+//   } catch (err: any) {
+//     return NextResponse.json({ error: err.message }, { status: 500 });
+//   }
+// }
 export async function GET() {
   try {
-    const rows = await sql`SELECT * FROM bookmarks ORDER BY id ASC`;
-    return NextResponse.json({ tree: rows });
+    // Fetch everything: both folders and links
+    const rows = await sql`SELECT * FROM bookmarks ORDER BY type DESC, name ASC`;
+    
+    // Transform flat database rows into a nested tree structure
+    const buildTree = (items: any[], parentId: string | null = null): any[] => {
+      return items
+        .filter(item => item.folder_id === parentId)
+        .map(item => ({
+          ...item,
+          children: item.type === 'folder' ? buildTree(items, item.id.toString()) : []
+        }));
+    };
+
+    return NextResponse.json({ tree: buildTree(rows) });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
-
 // 2. ADD NEW (POST)
 export async function POST(request: Request) {
   try {

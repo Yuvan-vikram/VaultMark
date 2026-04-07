@@ -86,7 +86,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...data, folderId, type: modal?.mode === 'add-folder' ? 'folder' : 'link' }),
-      })
+      });
       if (!res.ok) throw new Error('Failed to save')
       setModal(null)
       await loadBookmarks()
