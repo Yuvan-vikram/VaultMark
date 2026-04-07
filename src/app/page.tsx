@@ -25,7 +25,6 @@ function flattenLinks(tree: BookmarkItem[]): BookmarkItem[] {
   return result
 }
 
-// Only direct children links of a folder (not recursive)
 function getFolderDirectLinks(tree: BookmarkItem[], folderId: string | null): BookmarkItem[] {
   if (!folderId) return flattenLinks(tree)
   function find(items: BookmarkItem[]): BookmarkItem[] | null {
@@ -41,7 +40,6 @@ function getFolderDirectLinks(tree: BookmarkItem[], folderId: string | null): Bo
   return find(tree) || []
 }
 
-// Get folder name by id
 function getFolderName(tree: BookmarkItem[], folderId: string | null): string {
   if (!folderId) return 'All bookmarks'
   function find(items: BookmarkItem[]): string | null {
@@ -66,26 +64,28 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [copied, setCopied] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  // For path picker: when user clicks "Browse" in modal, we switch to file tab
   const [pathPickerMode, setPathPickerMode] = useState(false)
   const pathPickerCallback = useRef<((path: string) => void) | null>(null)
 
   const loadBookmarks = useCallback(async () => {
-    const res = await fetch('/api/bookmarks')
-    const data = await res.json()
-    setTree(data.tree || [])
+    try {
+      const res = await fetch('/api/bookmarks')
+      const data = await res.json()
+      setTree(data.tree || [])
+    } catch (error) {
+      console.error("Failed to load bookmarks:", error)
+    }
   }, [])
 
   useEffect(() => { loadBookmarks() }, [loadBookmarks])
 
-  // FIX: capture folderId before modal is cleared
   async function handleAddItem(data: any, folderId: string | null) {
     setSaving(true)
     try {
       const res = await fetch('/api/bookmarks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, folderId }),
+        body: JSON.stringify({ ...data, folderId, type: modal?.mode === 'add-folder' ? 'folder' : 'link' }),
       })
       if (!res.ok) throw new Error('Failed to save')
       setModal(null)
@@ -100,10 +100,11 @@ export default function Home() {
   async function handleEditItem(data: any, itemId: string) {
     setSaving(true)
     try {
-      const res = await fetch(`/api/bookmarks/${itemId}`, {
-        method: 'PATCH',
+      // Using PUT as defined in our route.ts
+      const res = await fetch('/api/bookmarks', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, id: itemId }),
       })
       if (!res.ok) throw new Error('Failed to update')
       setModal(null)
@@ -117,11 +118,17 @@ export default function Home() {
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this item?')) return
-    await fetch(`/api/bookmarks/${id}`, { method: 'DELETE' })
-    loadBookmarks()
+    try {
+      const res = await fetch(`/api/bookmarks?id=${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Delete failed')
+      await loadBookmarks()
+    } catch (e) {
+      alert('Failed to delete item.')
+    }
   }
 
   function handleOpenLink(url: string) {
+    if (!url) return
     if (url.startsWith('http')) {
       window.open(url, '_blank')
     } else {
@@ -137,14 +144,12 @@ export default function Home() {
     setTimeout(() => setCopied(null), 2000)
   }
 
-  // Called when user wants to browse filesystem to pick a path
   function handleBrowseForPath(cb: (path: string) => void) {
     pathPickerCallback.current = cb
     setPathPickerMode(true)
     setTab('files')
   }
 
-  // Called from FileBrowser when a path is selected in picker mode
   function handlePathPicked(path: string) {
     if (pathPickerCallback.current) {
       pathPickerCallback.current(path)
@@ -168,7 +173,6 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
-      {/* Top nav */}
       <header
         className="flex items-center gap-4 px-5 h-14 flex-shrink-0"
         style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
@@ -198,14 +202,12 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Path picker banner */}
         {pathPickerMode && (
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm flex-1"
             style={{ background: 'rgba(240,165,0,0.12)', border: '1px solid rgba(240,165,0,0.3)', color: 'var(--accent)' }}
           >
             <span className="font-medium">📂 Pick a file or folder path</span>
-            <span style={{ color: 'var(--text2)' }}>— click any file or use the copy button, then come back</span>
             <button
               onClick={() => { setPathPickerMode(false); setTab('bookmarks') }}
               className="ml-auto px-2 py-0.5 rounded text-xs"
@@ -224,8 +226,8 @@ export default function Home() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search bookmarks..."
-                className="pl-8 pr-3 py-1.5 text-sm w-56"
-                style={{ background: 'var(--surface2)' }}
+                className="pl-8 pr-3 py-1.5 text-sm w-56 outline-none rounded-lg"
+                style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}
               />
             </div>
             <button
@@ -237,7 +239,7 @@ export default function Home() {
               {viewMode === 'grid' ? <List size={15} /> : <LayoutGrid size={15} />}
             </button>
             <button
-              onClick={() => setModal({ mode: 'add-folder', folderId: null })}
+              onClick={() => setModal({ mode: 'add-folder', folderId: selectedFolder })}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm"
               style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
             >
@@ -258,7 +260,6 @@ export default function Home() {
 
       {tab === 'bookmarks' ? (
         <div className="flex flex-1 overflow-hidden">
-          {/* Sidebar */}
           <aside
             className="w-56 flex-shrink-0 overflow-y-auto py-3 px-2"
             style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)' }}
@@ -267,7 +268,7 @@ export default function Home() {
               className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer mb-1 transition-all"
               style={{
                 background: !selectedFolder && !search ? 'var(--surface2)' : 'transparent',
-                borderLeft: !selectedFolder ? '2px solid var(--accent)' : '2px solid transparent',
+                borderLeft: !selectedFolder && !search ? '2px solid var(--accent)' : '2px solid transparent',
               }}
               onClick={() => { setSelectedFolder(null); setSearch('') }}
             >
@@ -313,14 +314,12 @@ export default function Home() {
             )}
           </aside>
 
-          {/* Main content */}
           <main className="flex-1 overflow-y-auto p-5">
-            {/* Breadcrumb */}
             <div className="flex items-center gap-1 mb-4">
               <button
                 onClick={() => { setSelectedFolder(null); setSearch('') }}
                 className="text-sm hover:underline"
-                style={{ color: selectedFolder ? 'var(--text2)' : 'var(--text)' }}
+                style={{ color: selectedFolder || search ? 'var(--text2)' : 'var(--text)' }}
               >
                 All bookmarks
               </button>
@@ -360,119 +359,76 @@ export default function Home() {
               </div>
             )}
 
-            {viewMode === 'grid' ? (
-              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px,1fr))' }}>
-                {displayLinks.map(item => (
-                  <div
-                    key={item.id}
-                    className="group rounded-xl p-4 cursor-pointer transition-all relative"
-                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-                    onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border2)')}
-                    onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                    onClick={() => handleOpenLink(item.url || '')}
-                  >
-                    <div className="flex items-start gap-3 mb-2">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0"
-                        style={{ background: 'var(--surface2)', color: 'var(--accent)' }}
-                      >
-                        {item.name[0].toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm truncate">{item.name}</div>
-                        <div className="text-xs truncate mt-0.5" style={{ color: 'var(--text3)', fontFamily: 'monospace' }}>
-                          {item.url}
-                        </div>
-                      </div>
-                    </div>
-                    {item.description && (
-                      <p className="text-xs mb-2 line-clamp-2" style={{ color: 'var(--text2)' }}>{item.description}</p>
-                    )}
-                    {item.tags && item.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {item.tags.map(t => (
-                          <span key={t} className="text-xs px-2 py-0.5 rounded-full"
-                            style={{ background: 'var(--surface2)', color: 'var(--text3)' }}>
-                            #{t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={e => { e.stopPropagation(); setModal({ mode: 'edit', folderId: null, item }) }}
-                        className="p-1.5 rounded-lg text-xs"
-                        style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
-                        title="Edit"
-                      >✎</button>
-                      {item.url?.startsWith('http') ? (
-                        <button
-                          onClick={e => { e.stopPropagation(); window.open(item.url, '_blank') }}
-                          className="p-1.5 rounded-lg"
-                          style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
-                          title="Open in new tab"
-                        >
-                          <ExternalLink size={12} />
-                        </button>
-                      ) : (
-                        <button
-                          onClick={e => { e.stopPropagation(); copyPath(item.url || '') }}
-                          className="p-1.5 rounded-lg"
-                          style={{ background: 'var(--surface2)', color: copied === item.url ? '#10b981' : 'var(--text2)' }}
-                          title="Copy local path"
-                        >
-                          <Copy size={12} />
-                        </button>
-                      )}
-                      <button
-                        onClick={e => { e.stopPropagation(); handleDelete(item.id) }}
-                        className="p-1.5 rounded-lg"
-                        style={{ background: 'rgba(244,63,94,0.12)', color: '#f43f5e' }}
-                        title="Delete"
-                      >×</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-xl overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                {displayLinks.map((item, i) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center gap-3 px-4 py-3 cursor-pointer group transition-all"
-                    style={{ borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface2)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    onClick={() => handleOpenLink(item.url || '')}
-                  >
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
-                      style={{ background: 'var(--surface2)', color: 'var(--accent)' }}>
+            <div className={viewMode === 'grid' ? "grid gap-3" : "flex flex-col gap-1"} 
+                 style={viewMode === 'grid' ? { gridTemplateColumns: 'repeat(auto-fill, minmax(260px,1fr))' } : {}}>
+              {displayLinks.map(item => (
+                <div
+                  key={item.id}
+                  className={`group rounded-xl cursor-pointer transition-all relative ${viewMode === 'list' ? 'flex items-center p-3' : 'p-4'}`}
+                  style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+                  onClick={() => handleOpenLink(item.url || '')}
+                >
+                  <div className={`flex items-start gap-3 ${viewMode === 'list' ? 'flex-1 items-center' : 'mb-2'}`}>
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0"
+                      style={{ background: 'var(--surface2)', color: 'var(--accent)' }}
+                    >
                       {item.name[0].toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium">{item.name}</div>
-                      <div className="text-xs truncate" style={{ color: 'var(--text3)', fontFamily: 'monospace' }}>{item.url}</div>
-                    </div>
-                    {item.tags?.map(t => (
-                      <span key={t} className="text-xs px-2 py-0.5 rounded-full hidden sm:block"
-                        style={{ background: 'var(--surface2)', color: 'var(--text3)' }}>#{t}</span>
-                    ))}
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={e => { e.stopPropagation(); setModal({ mode: 'edit', folderId: null, item }) }}
-                        className="p-1.5 rounded" style={{ color: 'var(--text3)' }}>✎</button>
-                      {!item.url?.startsWith('http') && (
-                        <button onClick={e => { e.stopPropagation(); copyPath(item.url || '') }}
-                          className="p-1.5 rounded" style={{ color: 'var(--text3)' }}>
-                          <Copy size={13} />
-                        </button>
-                      )}
-                      <button onClick={e => { e.stopPropagation(); handleDelete(item.id) }}
-                        className="p-1.5 rounded" style={{ color: '#f43f5e' }}>×</button>
+                      <div className="font-medium text-sm truncate">{item.name}</div>
+                      <div className="text-xs truncate mt-0.5" style={{ color: 'var(--text3)', fontFamily: 'monospace' }}>
+                        {item.url}
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                  
+                  {viewMode === 'grid' && item.description && (
+                    <p className="text-xs mb-2 line-clamp-2" style={{ color: 'var(--text2)' }}>{item.description}</p>
+                  )}
+
+                  <div className="flex flex-wrap gap-1">
+                    {item.tags?.map(t => (
+                      <span key={t} className="text-xs px-2 py-0.5 rounded-full"
+                        style={{ background: 'var(--surface2)', color: 'var(--text3)' }}>
+                        #{t}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className={`flex gap-1 transition-opacity ${viewMode === 'grid' ? 'absolute top-3 right-3 opacity-0 group-hover:opacity-100' : 'ml-auto opacity-0 group-hover:opacity-100'}`}>
+                    <button
+                      onClick={e => { e.stopPropagation(); setModal({ mode: 'edit', folderId: null, item }) }}
+                      className="p-1.5 rounded-lg text-xs"
+                      style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
+                      title="Edit"
+                    >✎</button>
+                    {item.url?.startsWith('http') ? (
+                      <button
+                        onClick={e => { e.stopPropagation(); window.open(item.url, '_blank') }}
+                        className="p-1.5 rounded-lg"
+                        style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
+                      >
+                        <ExternalLink size={12} />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={e => { e.stopPropagation(); copyPath(item.url || '') }}
+                        className="p-1.5 rounded-lg"
+                        style={{ background: 'var(--surface2)', color: copied === item.url ? '#10b981' : 'var(--text2)' }}
+                      >
+                        <Copy size={12} />
+                      </button>
+                    )}
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDelete(item.id) }}
+                      className="p-1.5 rounded-lg"
+                      style={{ background: 'rgba(244,63,94,0.12)', color: '#f43f5e' }}
+                    >×</button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </main>
         </div>
       ) : (
@@ -491,7 +447,6 @@ export default function Home() {
           item={modal.item}
           saving={saving}
           onSave={(data) => {
-            // FIX: capture folderId and itemId at call time, not after modal closes
             if (modal.mode === 'edit' && modal.item) {
               handleEditItem(data, modal.item.id)
             } else {
