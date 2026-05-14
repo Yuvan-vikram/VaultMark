@@ -1,468 +1,367 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Bookmark, HardDrive, Plus, FolderPlus, Search,
-  ExternalLink, Copy, Tag, Star, LayoutGrid, List, ChevronRight
+  Bookmark, Plus, FolderPlus, Search, 
+  Copy, Star, Check, Download, Upload, BarChart3, Settings2, Palette, X
 } from 'lucide-react'
 import { BookmarkTree } from '@/components/BookmarkTree'
-import { FileBrowser } from '@/components/FileBrowser'
 import { ItemModal } from '@/components/ItemModal'
 import type { BookmarkItem } from '@/lib/data'
 
-type Tab = 'bookmarks' | 'files'
-type Modal = { mode: 'add-link' | 'add-folder' | 'edit'; folderId: string | null; item?: BookmarkItem } | null
-type ViewMode = 'grid' | 'list'
-
-function flattenLinks(tree: BookmarkItem[]): BookmarkItem[] {
-  const result: BookmarkItem[] = []
-  function walk(items: BookmarkItem[]) {
-    for (const item of items) {
-      if (item.type === 'link') result.push(item)
-      if (item.children) walk(item.children)
-    }
-  }
-  walk(tree)
-  return result
-}
-
-function getFolderDirectLinks(tree: BookmarkItem[], folderId: string | null): BookmarkItem[] {
-  if (!folderId) return flattenLinks(tree)
-  function find(items: BookmarkItem[]): BookmarkItem[] | null {
-    for (const item of items) {
-      if (item.id === folderId) return (item.children || []).filter(i => i.type === 'link')
-      if (item.children) {
-        const found = find(item.children)
-        if (found !== null) return found
-      }
-    }
-    return null
-  }
-  return find(tree) || []
-}
-
-function getFolderName(tree: BookmarkItem[], folderId: string | null): string {
-  if (!folderId) return 'All bookmarks'
-  function find(items: BookmarkItem[]): string | null {
-    for (const item of items) {
-      if (item.id === folderId) return item.name
-      if (item.children) {
-        const found = find(item.children)
-        if (found) return found
-      }
-    }
-    return null
-  }
-  return find(tree) || 'Folder'
-}
+type Theme = 'dark' | 'midnight' | 'snow' | 'slate' | 'amethyst' | 'crimson' | 'ocean' | 'coffee'
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>('bookmarks')
   const [tree, setTree] = useState<BookmarkItem[]>([])
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
-  const [modal, setModal] = useState<Modal>(null)
+  const [modal, setModal] = useState<{ mode: 'add-link' | 'add-folder' | 'edit'; folderId: string | null; item?: BookmarkItem } | null>(null)
   const [search, setSearch] = useState('')
-  const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [copied, setCopied] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [pathPickerMode, setPathPickerMode] = useState(false)
-  const pathPickerCallback = useRef<((path: string) => void) | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  
+  // Set default theme to 'dark'
+  const [theme, setTheme] = useState<Theme>('dark')
+  
+  // Graph toggle state
+  const [showGraph, setShowGraph] = useState(false)
+  const graphRef = useRef<HTMLDivElement>(null)
 
-  const loadBookmarks = useCallback(async () => {
+  const themes = {
+    dark: { bg: '#0f0f0e', surface: '#1a1a19', border: '#262624', accent: '#f0a500', text: '#f3f4f6', shadow: 'rgba(0,0,0,0.5)' },
+    midnight: { bg: '#020617', surface: '#0f172a', border: '#1e293b', accent: '#38bdf8', text: '#f3f4f6', shadow: 'rgba(0,0,0,0.6)' },
+    snow: { bg: '#f8fafc', surface: '#ffffff', border: '#e2e8f0', accent: '#2563eb', text: '#0f172a', shadow: 'rgba(0,0,0,0.05)' },
+    slate: { bg: '#0f172a', surface: '#1e293b', border: '#334155', accent: '#94a3b8', text: '#f3f4f6', shadow: 'rgba(0,0,0,0.4)' },
+    amethyst: { bg: '#120b1e', surface: '#1c112d', border: '#2d1b4a', accent: '#a855f7', text: '#f3f4f6', shadow: 'rgba(0,0,0,0.5)' },
+    crimson: { bg: '#1a0505', surface: '#2a0a0a', border: '#3d0f0f', accent: '#f43f5e', text: '#f3f4f6', shadow: 'rgba(0,0,0,0.5)' },
+    ocean: { bg: '#061621', surface: '#0a2333', border: '#11354d', accent: '#0ea5e9', text: '#f3f4f6', shadow: 'rgba(0,0,0,0.5)' },
+    coffee: { bg: '#120d0b', surface: '#1c1512', border: '#2d221e', accent: '#a16207', text: '#f3f4f6', shadow: 'rgba(0,0,0,0.5)' }
+  }
+
+  const loadData = useCallback(async () => {
     try {
       const res = await fetch('/api/bookmarks')
       const data = await res.json()
       setTree(data.tree || [])
-    } catch (error) {
-      console.error("Failed to load bookmarks:", error)
-    }
+    } catch (e) { console.error("Load failed", e) }
   }, [])
 
-  useEffect(() => { loadBookmarks() }, [loadBookmarks])
-
-  async function handleAddItem(data: any, folderId: string | null) {
-    setSaving(true)
-    try {
-      const res = await fetch('/api/bookmarks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, folderId, type: modal?.mode === 'add-folder' ? 'folder' : 'link' }),
-      });
-      if (!res.ok) throw new Error('Failed to save')
-      setModal(null)
-      await loadBookmarks()
-    } catch (e) {
-      alert('Failed to save bookmark. Please try again.')
-    } finally {
-      setSaving(false)
+  // Hydrate theme selection from localStorage on mount
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('vaultmark_theme') as Theme
+    if (savedTheme && Object.keys(themes).includes(savedTheme)) {
+      setTheme(savedTheme)
     }
+    loadData()
+  }, [loadData])
+
+  // Custom handler to change theme and update browser cache
+  const handleThemeChange = (newTheme: Theme) => {
+    setTheme(newTheme)
+    localStorage.setItem('vaultmark_theme', newTheme)
   }
 
-  async function handleEditItem(data: any, itemId: string) {
-    setSaving(true)
-    try {
-      // Using PUT as defined in our route.ts
-      const res = await fetch('/api/bookmarks', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, id: itemId }),
-      })
-      if (!res.ok) throw new Error('Failed to update')
-      setModal(null)
-      await loadBookmarks()
-    } catch (e) {
-      alert('Failed to update. Please try again.')
-    } finally {
-      setSaving(false)
+  // Click outside to close graph dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (graphRef.current && !graphRef.current.contains(event.target as Node)) {
+        setShowGraph(false)
+      }
     }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  const handleExport = () => {
+    const dataStr = JSON.stringify(tree, null, 2)
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
+    const linkElement = document.createElement('a')
+    linkElement.setAttribute('href', dataUri)
+    linkElement.setAttribute('download', `vaultmark_backup_${new Date().toISOString().split('T')[0]}.json`)
+    linkElement.click()
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async (event) => {
+      try {
+        const imported = JSON.parse(event.target?.result as string)
+        alert("Import successful!")
+      } catch (err) { alert("Invalid JSON file") }
+    }
+    reader.readAsText(file)
+  }
+
+  const handleCopy = (id: string, url: string) => {
+    navigator.clipboard.writeText(url)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
+
+  async function handleAddItem(data: any, folderId: string | null) {
+    const res = await fetch('/api/bookmarks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, folderId, type: modal?.mode === 'add-folder' ? 'folder' : 'link' }),
+    })
+    if (res.ok) { setModal(null); loadData() }
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this item?')) return
-    try {
-      const res = await fetch(`/api/bookmarks?id=${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Delete failed')
-      await loadBookmarks()
-    } catch (e) {
-      alert('Failed to delete item.')
+    if (!confirm('Permanent delete?')) return
+    await fetch(`/api/bookmarks?id=${id}`, { method: 'DELETE' })
+    loadData()
+  }
+
+  // Count computation logic
+  const countItems = (items: BookmarkItem[]) => {
+    let links = 0, folders = 0
+    const traverse = (list: BookmarkItem[]) => {
+      list.forEach(i => {
+        if (i.type === 'link') links++
+        else { folders++; if (i.children) traverse(i.children) }
+      })
     }
+    traverse(items); return { links, folders }
+  }
+  const stats = countItems(tree)
+  const totalItems = stats.links + stats.folders
+  const linkPercentage = totalItems > 0 ? Math.round((stats.links / totalItems) * 100) : 0
+  const folderPercentage = totalItems > 0 ? Math.round((stats.folders / totalItems) * 100) : 0
+
+  const flattenLinks = (items: BookmarkItem[]): BookmarkItem[] => {
+    let links: BookmarkItem[] = []
+    items.forEach(i => {
+      if (i.type === 'link') links.push(i)
+      if (i.children) links = [...links, ...flattenLinks(i.children)]
+    })
+    return links
   }
 
-  function handleOpenLink(url: string) {
-    if (!url) return
-    if (url.startsWith('http')) {
-      window.open(url, '_blank')
-    } else {
-      navigator.clipboard.writeText(url).catch(() => {})
-      setCopied(url)
-      setTimeout(() => setCopied(null), 2000)
-    }
-  }
-
-  function copyPath(path: string) {
-    navigator.clipboard.writeText(path).catch(() => {})
-    setCopied(path)
-    setTimeout(() => setCopied(null), 2000)
-  }
-
-  function handleBrowseForPath(cb: (path: string) => void) {
-    pathPickerCallback.current = cb
-    setPathPickerMode(true)
-    setTab('files')
-  }
-
-  function handlePathPicked(path: string) {
-    if (pathPickerCallback.current) {
-      pathPickerCallback.current(path)
-      pathPickerCallback.current = null
-    }
-    setPathPickerMode(false)
-    setTab('bookmarks')
-  }
-
-  const allLinks = flattenLinks(tree)
-  const displayLinks = search
-    ? allLinks.filter(i =>
-        i.name.toLowerCase().includes(search.toLowerCase()) ||
-        (i.url || '').toLowerCase().includes(search.toLowerCase()) ||
-        (i.tags || []).some(t => t.toLowerCase().includes(search.toLowerCase()))
-      )
-    : getFolderDirectLinks(tree, selectedFolder)
-
-  const allTags = Array.from(new Set(allLinks.flatMap(i => i.tags || [])))
-  const folderName = getFolderName(tree, selectedFolder)
+  const displayLinks = search 
+    ? flattenLinks(tree).filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+    : (() => {
+        const findFolderLinks = (items: BookmarkItem[]): BookmarkItem[] => {
+          for (const item of items) {
+            if (item.id === selectedFolder) return (item.children || []).filter(c => c.type === 'link')
+            if (item.children) {
+              const res = findFolderLinks(item.children)
+              if (res.length) return res
+            }
+          }
+          return []
+        }
+        return selectedFolder ? findFolderLinks(tree) : flattenLinks(tree)
+      })()
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
-      <header
-        className="flex items-center gap-4 px-5 h-14 flex-shrink-0"
-        style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent)' }}>
-            <Bookmark size={14} color="#0f0f0e" />
+    <div className="flex flex-col h-screen overflow-hidden transition-all duration-500 font-sans" 
+         style={{ backgroundColor: themes[theme].bg, color: themes[theme].text }}>
+      
+      {/* Top Navigation Bar */}
+      <header className="flex items-center gap-6 px-6 h-16 flex-shrink-0 z-10 shadow-sm" 
+              style={{ backgroundColor: themes[theme].surface, borderBottom: `1px solid ${themes[theme].border}` }}>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg" style={{ backgroundColor: themes[theme].accent }}>
+            <Bookmark size={18} color={theme === 'snow' ? '#fff' : '#000'} />
           </div>
-          <span className="font-semibold text-base tracking-tight">VaultMark</span>
+          <span className="font-extrabold text-xl tracking-tight">VaultMark <span className="text-[10px] opacity-40 font-mono ml-1">v1.0</span></span>
         </div>
 
-        <div className="flex gap-1 ml-4">
-          {([['bookmarks', Bookmark, 'Bookmarks'], ['files', HardDrive, 'File Browser']] as const).map(([id, Icon, label]) => (
-            <button
-              key={id}
-              onClick={() => { setTab(id); setPathPickerMode(false) }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all"
-              style={{
-                background: tab === id ? 'var(--surface2)' : 'transparent',
-                color: tab === id ? 'var(--text)' : 'var(--text2)',
-                borderBottom: tab === id ? '2px solid var(--accent)' : '2px solid transparent',
-              }}
-            >
-              <Icon size={14} />
-              {label}
-            </button>
-          ))}
+        {/* Global Search Interface */}
+        <div className="relative flex-1 max-w-md ml-4">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search your vault..." 
+                 className="w-full pl-10 pr-4 py-2 rounded-xl bg-black/5 border border-transparent focus:border-current/20 outline-none transition-all text-sm" 
+                 style={{ color: themes[theme].text }} />
         </div>
 
-        {pathPickerMode && (
-          <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm flex-1"
-            style={{ background: 'rgba(240,165,0,0.12)', border: '1px solid rgba(240,165,0,0.3)', color: 'var(--accent)' }}
+        {/* Corner Actions Module */}
+        <div className="flex items-center gap-3 ml-auto relative" ref={graphRef}>
+          {/* Chart Corner Icon Symbol Button */}
+          <button 
+            onClick={() => setShowGraph(!showGraph)} 
+            className={`p-2 rounded-lg transition-all ${showGraph ? 'bg-black/10 opacity-100' : 'opacity-60 hover:opacity-100 hover:bg-black/5'}`}
+            title="View Analytics Graph"
           >
-            <span className="font-medium">📂 Pick a file or folder path</span>
-            <button
-              onClick={() => { setPathPickerMode(false); setTab('bookmarks') }}
-              className="ml-auto px-2 py-0.5 rounded text-xs"
-              style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
-            >
-              Cancel
-            </button>
-          </div>
-        )}
+            <BarChart3 size={18} style={{ color: showGraph ? themes[theme].accent : 'inherit' }} />
+          </button>
 
-        {tab === 'bookmarks' && !pathPickerMode && (
-          <div className="flex items-center gap-2 ml-auto">
-            <div className="relative">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text3)' }} />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search bookmarks..."
-                className="pl-8 pr-3 py-1.5 text-sm w-56 outline-none rounded-lg"
-                style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}
-              />
+          {/* THE CORNER CLICK DROPDOWN GRAPH PANEL */}
+          {showGraph && (
+            <div 
+              className="absolute right-0 top-12 w-64 p-4 rounded-2xl border shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+              style={{ backgroundColor: themes[theme].surface, borderColor: themes[theme].border, boxShadow: `0 10px 30px ${themes[theme].shadow}` }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider opacity-40">Vault Distribution</span>
+                <button onClick={() => setShowGraph(false)} className="opacity-40 hover:opacity-100">
+                  <X size={12} />
+                </button>
+              </div>
+              
+              <div className="w-full h-2 rounded-full bg-black/20 overflow-hidden flex mb-4">
+                <div 
+                  className="h-full transition-all duration-500 ease-out" 
+                  style={{ 
+                    width: `${totalItems > 0 ? (stats.links / totalItems) * 100 : 50}%`, 
+                    backgroundColor: themes[theme].accent 
+                  }} 
+                />
+                <div className="h-full bg-white/20 flex-1" />
+              </div>
+
+              <div className="flex justify-between items-center text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: themes[theme].accent }} />
+                  <div>
+                    <p className="font-bold leading-none">{stats.links}</p>
+                    <p className="text-[9px] opacity-40 mt-0.5">Links ({linkPercentage}%)</p>
+                  </div>
+                </div>
+                <div className="w-[1px] h-6 bg-current opacity-10" />
+                <div className="flex items-center gap-2 text-right justify-end">
+                  <div>
+                    <p className="font-bold leading-none">{stats.folders}</p>
+                    <p className="text-[9px] opacity-40 mt-0.5">Folders ({folderPercentage}%)</p>
+                  </div>
+                  <span className="w-2 h-2 rounded-full bg-white/20" />
+                </div>
+              </div>
             </div>
-            <button
-              onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')}
-              className="p-2 rounded-lg"
-              style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
-              title="Toggle view"
-            >
-              {viewMode === 'grid' ? <List size={15} /> : <LayoutGrid size={15} />}
-            </button>
-            <button
-              onClick={() => setModal({ mode: 'add-folder', folderId: selectedFolder })}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm"
-              style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
-            >
-              <FolderPlus size={14} />
-              Folder
-            </button>
-            <button
-              onClick={() => setModal({ mode: 'add-link', folderId: selectedFolder })}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--accent)', color: '#0f0f0e' }}
-            >
-              <Plus size={14} />
-              Add link
-            </button>
-          </div>
-        )}
+          )}
+
+          <button onClick={handleExport} className="p-2 hover:bg-black/5 rounded-lg opacity-60 hover:opacity-100 transition-all" title="Export JSON Template">
+            <Download size={18} />
+          </button>
+          <label className="p-2 hover:bg-black/5 rounded-lg opacity-60 hover:opacity-100 transition-all cursor-pointer" title="Import Template Backup">
+            <Upload size={18} />
+            <input type="file" className="hidden" accept=".json" onChange={handleImport} />
+          </label>
+          <div className="h-6 w-[1px] bg-current opacity-10 mx-2" />
+          
+          <button onClick={() => setModal({ mode: 'add-folder', folderId: selectedFolder })}
+                  className="px-4 py-2 rounded-xl text-sm font-bold border border-current opacity-60 hover:opacity-100 transition-all">
+            <FolderPlus size={16} className="inline mr-2" /> Folder
+          </button>
+          <button onClick={() => setModal({ mode: 'add-link', folderId: selectedFolder })} 
+                  className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold shadow-lg hover:scale-105 transition-all"
+                  style={{ backgroundColor: themes[theme].accent, color: theme === 'snow' ? '#fff' : '#000' }}>
+            <Plus size={18} /> Add Link
+          </button>
+        </div>
       </header>
 
-      {tab === 'bookmarks' ? (
-        <div className="flex flex-1 overflow-hidden">
-          <aside
-            className="w-56 flex-shrink-0 overflow-y-auto py-3 px-2"
-            style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)' }}
-          >
-            <div
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer mb-1 transition-all"
-              style={{
-                background: !selectedFolder && !search ? 'var(--surface2)' : 'transparent',
-                borderLeft: !selectedFolder && !search ? '2px solid var(--accent)' : '2px solid transparent',
-              }}
-              onClick={() => { setSelectedFolder(null); setSearch('') }}
-            >
-              <Star size={14} style={{ color: 'var(--accent)' }} />
-              <span className="text-sm font-medium">All bookmarks</span>
-              <span className="ml-auto text-xs" style={{ color: 'var(--text3)' }}>{allLinks.length}</span>
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Side SideBar Panel */}
+        <aside className="w-72 flex-shrink-0 overflow-y-auto py-6 px-4 flex flex-col" 
+               style={{ backgroundColor: themes[theme].surface, borderRight: `1px solid ${themes[theme].border}` }}>
+          
+          {/* STATIC SIDEBAR COUNT PANEL */}
+          <div className="mb-6 px-4 py-3.5 rounded-2xl bg-black/5 border border-black/5">
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-40 mb-2">Vault Insights</p>
+            <div className="flex gap-4">
+              <div>
+                <p className="text-xl font-extrabold leading-tight">{stats.links}</p>
+                <p className="text-[10px] opacity-45">Links</p>
+              </div>
+              <div className="w-[1px] bg-current opacity-10 my-0.5" />
+              <div>
+                <p className="text-xl font-extrabold leading-tight">{stats.folders}</p>
+                <p className="text-[10px] opacity-45">Folders</p>
+              </div>
             </div>
+          </div>
 
-            <div className="my-2" style={{ borderTop: '1px solid var(--border)' }} />
-            <div className="text-xs px-2 mb-1" style={{ color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Folders</div>
-
-            <BookmarkTree
-              tree={tree}
-              selectedFolder={selectedFolder}
+          <div onClick={() => {setSelectedFolder(null); setSearch('')}} 
+               className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer mb-4 transition-all ${!selectedFolder ? 'bg-black/5 shadow-inner font-bold' : 'opacity-50 hover:opacity-100'}`}>
+            <Star size={18} style={{ color: !selectedFolder ? themes[theme].accent : 'inherit' }} /> 
+            <span className="text-sm">Main Vault</span>
+          </div>
+          
+          <div className="flex-1">
+             <BookmarkTree 
+              tree={tree} 
+              selectedFolder={selectedFolder} 
               onSelectFolder={setSelectedFolder}
               onAddItem={(folderId, type) => setModal({ mode: type === 'folder' ? 'add-folder' : 'add-link', folderId })}
+              onEdit={(item) => setModal({ mode: 'edit', folderId: null, item })}
               onDelete={handleDelete}
-              onEdit={item => setModal({ mode: 'edit', folderId: null, item })}
-              onOpenLink={handleOpenLink}
+              onOpenLink={(url) => window.open(url, '_blank')}
             />
+          </div>
 
-            {allTags.length > 0 && (
-              <>
-                <div className="my-2" style={{ borderTop: '1px solid var(--border)' }} />
-                <div className="text-xs px-2 mb-2" style={{ color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Tags</div>
-                <div className="flex flex-wrap gap-1 px-2">
-                  {allTags.map(tag => (
-                    <button
-                      key={tag}
-                      onClick={() => setSearch(tag)}
-                      className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all"
-                      style={{
-                        background: search === tag ? 'var(--accent)' : 'var(--surface2)',
-                        color: search === tag ? '#0f0f0e' : 'var(--text2)',
-                      }}
-                    >
-                      <Tag size={10} />
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </aside>
-
-          <main className="flex-1 overflow-y-auto p-5">
-            <div className="flex items-center gap-1 mb-4">
-              <button
-                onClick={() => { setSelectedFolder(null); setSearch('') }}
-                className="text-sm hover:underline"
-                style={{ color: selectedFolder || search ? 'var(--text2)' : 'var(--text)' }}
-              >
-                All bookmarks
-              </button>
-              {selectedFolder && (
-                <>
-                  <ChevronRight size={14} style={{ color: 'var(--text3)' }} />
-                  <span className="text-sm font-medium">{folderName}</span>
-                </>
-              )}
-              {search && (
-                <>
-                  <ChevronRight size={14} style={{ color: 'var(--text3)' }} />
-                  <span className="text-sm" style={{ color: 'var(--text2)' }}>Search: "{search}"</span>
-                </>
-              )}
-              <span className="ml-2 text-xs" style={{ color: 'var(--text3)' }}>({displayLinks.length})</span>
+          {/* Theme Selector */}
+          <div className="mt-auto pt-6 border-t border-black/5">
+            <div className="flex items-center justify-between px-2 mb-3">
+              <span className="text-[10px] font-bold uppercase opacity-40">Interface Theme</span>
+              <Palette size={12} className="opacity-40" />
             </div>
-
-            {displayLinks.length === 0 && (
-              <div
-                className="flex flex-col items-center justify-center rounded-2xl py-16 text-center"
-                style={{ background: 'var(--surface)', border: '1px dashed var(--border2)' }}
-              >
-                <Bookmark size={32} style={{ color: 'var(--text3)', marginBottom: 12 }} />
-                <p className="text-sm" style={{ color: 'var(--text2)' }}>
-                  {search ? 'No results found' : 'No links here yet'}
-                </p>
-                {!search && (
-                  <button
-                    onClick={() => setModal({ mode: 'add-link', folderId: selectedFolder })}
-                    className="mt-3 px-4 py-2 rounded-lg text-sm font-medium"
-                    style={{ background: 'var(--accent)', color: '#0f0f0e' }}
-                  >
-                    + Add your first link
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className={viewMode === 'grid' ? "grid gap-3" : "flex flex-col gap-1"} 
-                 style={viewMode === 'grid' ? { gridTemplateColumns: 'repeat(auto-fill, minmax(260px,1fr))' } : {}}>
-              {displayLinks.map(item => (
-                <div
-                  key={item.id}
-                  className={`group rounded-xl cursor-pointer transition-all relative ${viewMode === 'list' ? 'flex items-center p-3' : 'p-4'}`}
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-                  onClick={() => handleOpenLink(item.url || '')}
-                >
-                  <div className={`flex items-start gap-3 ${viewMode === 'list' ? 'flex-1 items-center' : 'mb-2'}`}>
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0"
-                      style={{ background: 'var(--surface2)', color: 'var(--accent)' }}
-                    >
-                      {item.name[0].toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{item.name}</div>
-                      <div className="text-xs truncate mt-0.5" style={{ color: 'var(--text3)', fontFamily: 'monospace' }}>
-                        {item.url}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {viewMode === 'grid' && item.description && (
-                    <p className="text-xs mb-2 line-clamp-2" style={{ color: 'var(--text2)' }}>{item.description}</p>
-                  )}
-
-                  <div className="flex flex-wrap gap-1">
-                    {item.tags?.map(t => (
-                      <span key={t} className="text-xs px-2 py-0.5 rounded-full"
-                        style={{ background: 'var(--surface2)', color: 'var(--text3)' }}>
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className={`flex gap-1 transition-opacity ${viewMode === 'grid' ? 'absolute top-3 right-3 opacity-0 group-hover:opacity-100' : 'ml-auto opacity-0 group-hover:opacity-100'}`}>
-                    <button
-                      onClick={e => { e.stopPropagation(); setModal({ mode: 'edit', folderId: null, item }) }}
-                      className="p-1.5 rounded-lg text-xs"
-                      style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
-                      title="Edit"
-                    >✎</button>
-                    {item.url?.startsWith('http') ? (
-                      <button
-                        onClick={e => { e.stopPropagation(); window.open(item.url, '_blank') }}
-                        className="p-1.5 rounded-lg"
-                        style={{ background: 'var(--surface2)', color: 'var(--text2)' }}
-                      >
-                        <ExternalLink size={12} />
-                      </button>
-                    ) : (
-                      <button
-                        onClick={e => { e.stopPropagation(); copyPath(item.url || '') }}
-                        className="p-1.5 rounded-lg"
-                        style={{ background: 'var(--surface2)', color: copied === item.url ? '#10b981' : 'var(--text2)' }}
-                      >
-                        <Copy size={12} />
-                      </button>
-                    )}
-                    <button
-                      onClick={e => { e.stopPropagation(); handleDelete(item.id) }}
-                      className="p-1.5 rounded-lg"
-                      style={{ background: 'rgba(244,63,94,0.12)', color: '#f43f5e' }}
-                    >×</button>
-                  </div>
-                </div>
+            <div className="flex flex-wrap gap-2 px-2">
+              {(Object.keys(themes) as Theme[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => handleThemeChange(t)}
+                  className={`w-6 h-6 rounded-full border transition-all ${theme === t ? 'ring-2 ring-offset-2 ring-blue-500 scale-110' : 'opacity-70 hover:scale-110'}`}
+                  style={{ backgroundColor: themes[t].accent, borderColor: themes[t].border }}
+                  title={t}
+                />
               ))}
             </div>
-          </main>
-        </div>
-      ) : (
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <FileBrowser
-            pickerMode={pathPickerMode}
-            onPickPath={handlePathPicked}
-          />
-        </div>
-      )}
+          </div>
+        </aside>
+
+        {/* Workspace Content Panel */}
+        <main className="flex-1 overflow-y-auto p-10">
+          <div className="flex items-center justify-between mb-8">
+            <h2 className="text-2xl font-bold">
+              {search ? 'Search Results' : selectedFolder ? 'Folder Contents' : 'Recent Items'}
+            </h2>
+            <div className="flex items-center gap-2 opacity-40 text-xs">
+              <Settings2 size={14} /> Automatic Cloud Sync Active
+            </div>
+          </div>
+
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {displayLinks.map(item => (
+              <div key={item.id} 
+                   className="group p-6 rounded-3xl border transition-all duration-300 hover:shadow-2xl hover:-translate-y-1 relative"
+                   style={{ 
+                     backgroundColor: themes[theme].surface, 
+                     borderColor: themes[theme].border, 
+                     boxShadow: `0 10px 30px ${themes[theme].shadow}` 
+                   }}>
+                
+                <div className="flex items-center justify-between mb-6">
+                   <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xl shadow-inner"
+                        style={{ backgroundColor: `${themes[theme].accent}15`, color: themes[theme].accent }}>
+                     {item.name[0].toUpperCase()}
+                   </div>
+                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0">
+                     <button onClick={() => handleCopy(item.id, item.url || '')} className="p-2 rounded-xl hover:bg-black/5" title="Copy URL">
+                       {copiedId === item.id ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                     </button>
+                     <button onClick={() => handleDelete(item.id)} className="p-2 rounded-xl hover:bg-red-500/10 text-red-500">×</button>
+                   </div>
+                </div>
+
+                <div className="cursor-pointer" onClick={() => window.open(item.url || '', '_blank')}>
+                  <h3 className="font-bold text-lg mb-1 truncate leading-tight">{item.name}</h3>
+                  <p className="text-xs opacity-40 font-mono truncate">{item.url}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </main>
+      </div>
 
       {modal && (
-        <ItemModal
-          mode={modal.mode}
+        <ItemModal 
+          mode={modal.mode} 
+          item={modal.item} 
           folderId={modal.folderId}
-          item={modal.item}
-          saving={saving}
-          onSave={(data) => {
-            if (modal.mode === 'edit' && modal.item) {
-              handleEditItem(data, modal.item.id)
-            } else {
-              handleAddItem(data, modal.folderId)
-            }
-          }}
-          onClose={() => setModal(null)}
-          onBrowse={handleBrowseForPath}
+          onClose={() => setModal(null)} 
+          onSave={(data) => handleAddItem(data, modal.folderId)} 
         />
-      )}
-
-      {copied && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-sm font-medium z-50"
-          style={{ background: '#10b981', color: '#fff' }}>
-          ✓ Path copied to clipboard
-        </div>
       )}
     </div>
   )

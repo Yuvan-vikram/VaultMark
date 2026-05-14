@@ -1,9 +1,7 @@
 'use client'
 import { useState } from 'react'
-import { ChevronRight, Folder, FolderOpen, Link, Plus, Trash2, Edit2, ExternalLink } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, Link, Plus, Trash2, Edit2 } from 'lucide-react'
 import type { BookmarkItem } from '@/lib/data'
-
-const FOLDER_COLORS = ['#f0a500','#3b82f6','#10b981','#f43f5e','#8b5cf6','#06b6d4','#f97316']
 
 type Props = {
   tree: BookmarkItem[]
@@ -27,46 +25,38 @@ function TreeNode({
   onEdit: (item: BookmarkItem) => void
   onOpenLink: (url: string) => void
 }) {
-  const [open, setOpen] = useState(depth === 0)
+  const [open, setOpen] = useState(false)
   const [hover, setHover] = useState(false)
   const isSelected = selectedFolder === item.id
   const color = item.color || '#9b9b96'
 
+  // Handling Links in Sidebar
   if (item.type === 'link') {
     return (
       <div
-        className="group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all"
-        style={{
-          paddingLeft: `${depth * 16 + 8}px`,
-          background: hover ? 'var(--surface2)' : 'transparent',
-        }}
+        className="group flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer transition-all"
+        style={{ paddingLeft: `${depth * 16 + 8}px`, background: hover ? 'rgba(0,0,0,0.05)' : 'transparent' }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        onClick={() => item.url && onOpenLink(item.url)}
+        onClick={() => onOpenLink?.(item.url || '')}
       >
-        <Link size={13} style={{ color: 'var(--text3)', flexShrink: 0 }} />
-        <span className="text-sm flex-1 truncate" style={{ color: 'var(--text2)' }}>{item.name}</span>
+        <Link size={13} className="opacity-40" />
+        <span className="text-sm flex-1 truncate">{item.name}</span>
+        
+        {/* ACTIONS FOR LINKS (EDIT & DELETE) */}
         {hover && (
-          <div className="flex items-center gap-1 ml-auto">
-            <button
-              onClick={e => { e.stopPropagation(); item.url && window.open(item.url, '_blank') }}
-              className="p-1 rounded"
-              style={{ color: 'var(--text3)' }}
-              title="Open in new tab"
-            >
-              <ExternalLink size={12} />
-            </button>
-            <button
-              onClick={e => { e.stopPropagation(); onEdit(item) }}
-              className="p-1 rounded"
-              style={{ color: 'var(--text3)' }}
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={(e) => { e.stopPropagation(); onEdit(item); }}
+              className="p-1 hover:bg-black/5 opacity-40 hover:opacity-100 rounded transition-colors"
+              title="Edit Link"
             >
               <Edit2 size={12} />
             </button>
-            <button
-              onClick={e => { e.stopPropagation(); onDelete(item.id) }}
-              className="p-1 rounded"
-              style={{ color: '#f43f5e' }}
+            <button 
+              onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+              className="p-1 hover:bg-red-500/10 text-red-500/40 hover:text-red-500 rounded transition-colors"
+              title="Delete Link"
             >
               <Trash2 size={12} />
             </button>
@@ -76,57 +66,49 @@ function TreeNode({
     )
   }
 
+  // Handling Folders in Sidebar
   return (
     <div>
       <div
-        className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all select-none"
+        className="group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all select-none"
         style={{
           paddingLeft: `${depth * 16 + 8}px`,
-          background: isSelected ? 'var(--surface2)' : hover ? 'var(--surface2)' : 'transparent',
+          background: isSelected ? 'rgba(0,0,0,0.05)' : hover ? 'rgba(0,0,0,0.02)' : 'transparent',
           borderLeft: isSelected ? `2px solid ${color}` : '2px solid transparent',
         }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        onClick={() => { setOpen(!open); onSelectFolder(item.id) }}
+        onClick={() => onSelectFolder(item.id)}
       >
-        <ChevronRight
-          size={14}
-          style={{
-            color: 'var(--text3)',
-            flexShrink: 0,
-            transform: open ? 'rotate(90deg)' : 'none',
-            transition: 'transform 0.15s',
-          }}
-        />
-        {open
-          ? <FolderOpen size={15} style={{ color, flexShrink: 0 }} />
-          : <Folder size={15} style={{ color, flexShrink: 0 }} />
-        }
-        <span className="text-sm font-medium flex-1 truncate" style={{ color: 'var(--text)' }}>{item.name}</span>
-        <span className="text-xs" style={{ color: 'var(--text3)' }}>
-          {(item.children || []).length}
-        </span>
+        <div onClick={(e) => { e.stopPropagation(); setOpen(!open); }} className="p-1 hover:bg-black/5 rounded">
+          <ChevronRight size={14} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+        </div>
+        
+        {open ? <FolderOpen size={15} style={{ color }} /> : <Folder size={15} style={{ color }} />}
+        
+        <span className="text-sm font-medium flex-1 truncate">{item.name}</span>
+
+        {/* FOLDER ACTIONS */}
         {hover && (
-          <div className="flex items-center gap-1 ml-1">
-            <button
-              onClick={e => { e.stopPropagation(); onAddItem(item.id, 'link') }}
-              className="p-1 rounded"
-              style={{ color: 'var(--text3)' }}
-              title="Add link"
+          <div className="flex items-center gap-0.5">
+            <button 
+              onClick={(e) => { e.stopPropagation(); onAddItem(item.id, 'link'); }} 
+              className="p-1 opacity-40 hover:opacity-100 hover:bg-black/5 rounded"
+              title="Add Link"
             >
-              <Plus size={12} />
+              <Plus size={14} />
             </button>
-            <button
-              onClick={e => { e.stopPropagation(); onEdit(item) }}
-              className="p-1 rounded"
-              style={{ color: 'var(--text3)' }}
+            <button 
+              onClick={(e) => { e.stopPropagation(); onEdit(item); }} 
+              className="p-1 opacity-40 hover:opacity-100 hover:bg-black/5 rounded"
+              title="Edit Folder"
             >
               <Edit2 size={12} />
             </button>
-            <button
-              onClick={e => { e.stopPropagation(); onDelete(item.id) }}
-              className="p-1 rounded"
-              style={{ color: '#f43f5e' }}
+            <button 
+              onClick={(e) => { e.stopPropagation(); onDelete(item.id); }} 
+              className="p-1 text-red-500/40 hover:text-red-500 hover:bg-red-500/10 rounded"
+              title="Delete Folder"
             >
               <Trash2 size={12} />
             </button>
@@ -135,7 +117,7 @@ function TreeNode({
       </div>
 
       {open && item.children && (
-        <div>
+        <div className="flex flex-col">
           {item.children.map(child => (
             <TreeNode
               key={child.id}
@@ -149,35 +131,17 @@ function TreeNode({
               onOpenLink={onOpenLink}
             />
           ))}
-          <div
-            className="flex items-center gap-2 rounded-lg cursor-pointer transition-all"
-            style={{ paddingLeft: `${(depth + 1) * 16 + 8}px`, paddingTop: 4, paddingBottom: 4 }}
-            onClick={() => onAddItem(item.id, 'link')}
-          >
-            <Plus size={12} style={{ color: 'var(--text3)' }} />
-            <span className="text-xs" style={{ color: 'var(--text3)' }}>Add link here</span>
-          </div>
         </div>
       )}
     </div>
   )
 }
 
-export function BookmarkTree({ tree, selectedFolder, onSelectFolder, onAddItem, onDelete, onEdit, onOpenLink }: Props) {
+export function BookmarkTree(props: Props) {
   return (
     <div className="flex flex-col gap-0.5">
-      {tree.map(item => (
-        <TreeNode
-          key={item.id}
-          item={item}
-          depth={0}
-          selectedFolder={selectedFolder}
-          onSelectFolder={onSelectFolder}
-          onAddItem={onAddItem}
-          onDelete={onDelete}
-          onEdit={onEdit}
-          onOpenLink={onOpenLink}
-        />
+      {props.tree.map(item => (
+        <TreeNode key={item.id} {...props} item={item} depth={0} />
       ))}
     </div>
   )
